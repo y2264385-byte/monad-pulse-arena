@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createPublicClient,
+  decodeFunctionResult,
   encodeFunctionData,
   getContract,
   http,
@@ -110,6 +111,11 @@ function explorerAddressUrl(address: Address) {
 
 function formatPulseTime(timestamp: number) {
   return new Date(timestamp * 1000).toLocaleTimeString()
+}
+
+function hexToBigInt(value: string | undefined) {
+  if (!value) return 0n
+  return BigInt(value)
 }
 
 function App() {
@@ -296,21 +302,51 @@ function App() {
   const loadPulses = useCallback(async () => {
     if (!isContractReady) return
 
-    const contract = getContract({
-      address: pulseProofAddress,
-      abi: pulseProofAbi,
-      client: publicClient,
-    })
-    const rawPulses = await contract.read.getPulses()
-    setPulses(
-      rawPulses.map((pulse) => ({
-        id: Number(pulse.id),
-        runner: pulse.runner,
-        label: pulse.label,
-        createdAt: Number(pulse.createdAt),
-        observedBlock: Number(pulse.observedBlock),
-      })),
-    )
+    try {
+      let rawPulses:
+        | ReadonlyArray<{
+            id: bigint
+            runner: Address
+            label: string
+            createdAt: bigint
+            observedBlock: bigint
+          }>
+
+      if (window.ethereum) {
+        const data = encodeFunctionData({
+          abi: pulseProofAbi,
+          functionName: 'getPulses',
+        })
+        const result = (await window.ethereum.request({
+          method: 'eth_call',
+          params: [{ to: pulseProofAddress, data }, 'latest'],
+        })) as `0x${string}`
+        rawPulses = decodeFunctionResult({
+          abi: pulseProofAbi,
+          functionName: 'getPulses',
+          data: result,
+        })
+      } else {
+        const contract = getContract({
+          address: pulseProofAddress,
+          abi: pulseProofAbi,
+          client: publicClient,
+        })
+        rawPulses = await contract.read.getPulses()
+      }
+
+      setPulses(
+        rawPulses.map((pulse) => ({
+          id: Number(pulse.id),
+          runner: pulse.runner,
+          label: pulse.label,
+          createdAt: Number(pulse.createdAt),
+          observedBlock: Number(pulse.observedBlock),
+        })),
+      )
+    } catch {
+      // Keep the UI usable even if a browser RPC endpoint refuses reads.
+    }
   }, [isContractReady])
 
   useEffect(() => {
@@ -406,19 +442,22 @@ function App() {
     try {
       const label = pulseLabel.trim() || 'Live execution probe'
       const startedAt = performance.now()
-      const estimatedGas = await publicClient.estimateContractGas({
-        account: activeAccount,
-        address: pulseProofAddress,
-        abi: pulseProofAbi,
-        functionName: 'runPulse',
-        args: [label],
-      })
-      const gas = (estimatedGas * 12n) / 10n
       const data = encodeFunctionData({
         abi: pulseProofAbi,
         functionName: 'runPulse',
         args: [label],
       })
+      const estimatedGasHex = (await window.ethereum?.request({
+        method: 'eth_estimateGas',
+        params: [
+          {
+            from: activeAccount,
+            to: pulseProofAddress,
+            data,
+          },
+        ],
+      })) as string | undefined
+      const gas = (hexToBigInt(estimatedGasHex) * 12n) / 10n
       const hash = (await window.ethereum?.request({
         method: 'eth_sendTransaction',
         params: [
@@ -434,20 +473,37 @@ function App() {
       setExecutionStage('confirming')
       setTxStatus(`Transaction submitted: ${shortAddress(hash)}`)
 
-      const receipt = await publicClient.waitForTransactionReceipt({ hash })
+      let receipt:
+        | {
+            blockNumber?: string
+            gasUsed?: string
+          }
+        | null
+        | undefined
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        receipt = (await window.ethereum?.request({
+          method: 'eth_getTransactionReceipt',
+          params: [hash],
+        })) as { blockNumber?: string; gasUsed?: string } | null | undefined
+        if (receipt) break
+        await new Promise((resolve) => window.setTimeout(resolve, 1200))
+      }
+      if (!receipt) throw new Error('Timed out while waiting for the transaction receipt.')
       const latencyMs = Math.round(performance.now() - startedAt)
       setProof({
         hash,
         label,
         runner: activeAccount,
-        blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed,
+        blockNumber: hexToBigInt(receipt.blockNumber),
+        gasUsed: hexToBigInt(receipt.gasUsed),
         latencyMs,
         recordedAt: new Date().toLocaleTimeString(),
       })
       setExecutionStage('confirmed')
       await loadPulses()
-      setTxStatus(`Confirmed in ${formatLatency(latencyMs)} on block ${receipt.blockNumber}.`)
+      setTxStatus(
+        `Confirmed in ${formatLatency(latencyMs)} on block ${hexToBigInt(receipt.blockNumber)}.`,
+      )
     } catch (error) {
       setExecutionStage('failed')
       setTxStatus(error instanceof Error ? error.message : 'Pulse Check failed.')
