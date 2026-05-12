@@ -10,7 +10,8 @@
     "seed:monad": "hardhat run scripts/seed.ts --network monadTestnet",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -21,6 +22,7 @@
     "viem": "^2.48.11"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.36.4",
     "@eslint/js": "^10.0.1",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.5",
     "@types/node": "^24.12.3",
@@ -33,6 +35,7 @@
     "globals": "^17.6.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "wrangler": "^4.90.1"
   }
 }
