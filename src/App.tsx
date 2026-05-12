@@ -35,6 +35,7 @@ import { formatCompact, formatNumber, shortAddress } from './lib/format'
 import { fetchGmonadsSnapshot, type GmonadsSnapshot } from './lib/gmonads'
 import { monadTestnet, switchToMonadTestnet } from './lib/monad'
 
+const emptyAddress = '0x0000000000000000000000000000000000000000'
 const defaultContractAddress = '0x35d42feD97705034BA4613f2e0bFE14309852472'
 const pulseProofAddress = (import.meta.env.VITE_PULSE_PROOF_ADDRESS || defaultContractAddress) as Address
 const monadVisionBaseUrl = 'https://testnet.monadvision.com'
@@ -107,7 +108,7 @@ function App() {
   const [txStatus, setTxStatus] = useState('')
   const [isTxPending, setIsTxPending] = useState(false)
 
-  const isContractReady = pulseProofAddress !== defaultContractAddress
+  const isContractReady = pulseProofAddress !== emptyAddress
   const latestPulse = pulses.at(-1)
 
   const metrics = useMemo(
