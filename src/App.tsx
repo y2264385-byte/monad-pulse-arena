@@ -545,28 +545,36 @@ function App() {
       })
       const gas = 250000n
 
-      // Fetch gas price from public RPC so MetaMask does not need to call
-      // eth_gasPrice internally (Monad RPC can return -32603 for wallet-initiated calls).
-      let gasPrice = 20000000000n // 20 gwei fallback for Monad testnet
+      // Supply every parameter MetaMask might otherwise fetch via RPC.
+      // Monad testnet returns -32603 for wallet-initiated eth_gasPrice /
+      // eth_getTransactionCount calls, which causes MetaMask to abort.
+      let gasPrice = 20000000000n // 20 gwei fallback
+      let nonce: bigint | undefined
       try {
-        const fetched = await publicClient.getGasPrice()
-        if (fetched > 0n) gasPrice = fetched
+        const [fetchedGas, fetchedNonce] = await Promise.all([
+          publicClient.getGasPrice(),
+          publicClient.getTransactionCount({ address: activeAccount }),
+        ])
+        if (fetchedGas > 0n) gasPrice = fetchedGas
+        nonce = BigInt(fetchedNonce)
       } catch {
-        // use fallback
+        // use fallback gasPrice; missing nonce is ok
       }
+
+      const txParams: Record<string, unknown> = {
+        from: activeAccount,
+        to: pulseProofAddress,
+        data,
+        gas: toHex(gas),
+        gasPrice: toHex(gasPrice),
+        type: '0x0',
+      }
+      if (nonce !== undefined) txParams.nonce = toHex(nonce)
 
       const sendTx = () =>
         window.ethereum?.request({
           method: 'eth_sendTransaction',
-          params: [
-            {
-              from: activeAccount,
-              to: pulseProofAddress,
-              data,
-              gas: toHex(gas),
-              gasPrice: toHex(gasPrice),
-            },
-          ],
+          params: [txParams],
         }) as Promise<Hash | undefined>
 
       let hash: Hash | undefined
