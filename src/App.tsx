@@ -22,10 +22,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createPublicClient,
-  createWalletClient,
-  custom,
+  encodeFunctionData,
   getContract,
   http,
+  toHex,
   type Address,
   type Hash,
 } from 'viem'
@@ -386,16 +386,6 @@ function App() {
     }
   }
 
-  const getWalletClient = (activeAccount: Address) => {
-    if (!window.ethereum) throw new Error('No wallet detected')
-
-    return createWalletClient({
-      account: activeAccount,
-      chain: monadTestnet,
-      transport: custom(window.ethereum),
-    })
-  }
-
   const runPulseCheck = async () => {
     if (!isContractReady) {
       setExecutionStage('failed')
@@ -415,7 +405,6 @@ function App() {
 
     try {
       const label = pulseLabel.trim() || 'Live execution probe'
-      const walletClient = getWalletClient(activeAccount)
       const startedAt = performance.now()
       const estimatedGas = await publicClient.estimateContractGas({
         account: activeAccount,
@@ -425,14 +414,23 @@ function App() {
         args: [label],
       })
       const gas = (estimatedGas * 12n) / 10n
-      const hash = await walletClient.writeContract({
-        account: activeAccount,
-        address: pulseProofAddress,
+      const data = encodeFunctionData({
         abi: pulseProofAbi,
         functionName: 'runPulse',
         args: [label],
-        gas,
       })
+      const hash = (await window.ethereum?.request({
+        method: 'eth_sendTransaction',
+        params: [
+          {
+            from: activeAccount,
+            to: pulseProofAddress,
+            data,
+            gas: toHex(gas),
+          },
+        ],
+      })) as Hash | undefined
+      if (!hash) throw new Error('Wallet did not return a transaction hash.')
       setExecutionStage('confirming')
       setTxStatus(`Transaction submitted: ${shortAddress(hash)}`)
 
