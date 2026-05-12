@@ -108,6 +108,17 @@ button:disabled {
   margin-top: 30px;
 }
 
+.wallet-status {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border: 1px solid #deddd5;
+  border-radius: 8px;
+  background: #fbfaf5;
+  color: #3c3548;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .primary-action,
 .ghost-action,
 .panel-topline button,

@@ -101,6 +101,8 @@ function App() {
   const [projects, setProjects] = useState<Project[]>(demoProjects)
   const [form, setForm] = useState({ name: '', pitch: '' })
   const [txStatus, setTxStatus] = useState('')
+  const [walletStatus, setWalletStatus] = useState('')
+  const [isWalletPending, setIsWalletPending] = useState(false)
   const [isTxPending, setIsTxPending] = useState(false)
 
   const isChainEnabled = Boolean(contractAddress)
@@ -188,15 +190,30 @@ function App() {
 
   const connectWallet = async () => {
     if (!window.ethereum) {
-      setTxStatus('请先安装 MetaMask 或兼容 EVM 钱包。')
+      const message = '未检测到钱包。请用安装了 MetaMask 的浏览器打开正式页面，不要在 Vercel 预览框里连接。'
+      setWalletStatus(message)
+      setTxStatus(message)
       return
     }
 
-    const [address] = (await window.ethereum.request({
-      method: 'eth_requestAccounts',
-    })) as Address[]
-    setAccount(address)
-    await switchToMonadTestnet()
+    setIsWalletPending(true)
+    setWalletStatus('正在请求钱包授权...')
+
+    try {
+      const [address] = (await window.ethereum.request({
+        method: 'eth_requestAccounts',
+      })) as Address[]
+      setAccount(address)
+      setWalletStatus('正在切换到 Monad Testnet...')
+      await switchToMonadTestnet()
+      setWalletStatus(`钱包已连接：${shortAddress(address)}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '钱包连接失败，请重试。'
+      setWalletStatus(message)
+      setTxStatus(message)
+    } finally {
+      setIsWalletPending(false)
+    }
   }
 
   const getWalletClient = (activeAccount: Address) => {
@@ -322,15 +339,21 @@ function App() {
             数据来自 gmonads，合约可部署到 Monad Testnet。
           </p>
           <div className="hero-actions">
-            <button type="button" className="primary-action" onClick={connectWallet}>
-              <Wallet size={18} />
-              {account ? shortAddress(account) : '连接钱包'}
+            <button
+              type="button"
+              className="primary-action"
+              onClick={connectWallet}
+              disabled={isWalletPending}
+            >
+              {isWalletPending ? <Loader2 className="spin" size={18} /> : <Wallet size={18} />}
+              {account ? shortAddress(account) : isWalletPending ? '连接中' : '连接钱包'}
             </button>
             <a href="https://docs.monad.xyz/" target="_blank" rel="noreferrer" className="ghost-action">
               <Code2 size={18} />
               Monad Docs
             </a>
           </div>
+          {walletStatus && <p className="wallet-status">{walletStatus}</p>}
         </div>
         <div className="live-panel" aria-label="Monad live network dashboard">
           <div className="panel-topline">
