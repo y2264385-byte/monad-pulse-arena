@@ -544,6 +544,17 @@ function App() {
         args: [label],
       })
       const gas = 250000n
+
+      // Fetch gas price from public RPC so MetaMask does not need to call
+      // eth_gasPrice internally (Monad RPC can return -32603 for wallet-initiated calls).
+      let gasPrice = 20000000000n // 20 gwei fallback for Monad testnet
+      try {
+        const fetched = await publicClient.getGasPrice()
+        if (fetched > 0n) gasPrice = fetched
+      } catch {
+        // use fallback
+      }
+
       const sendTx = () =>
         window.ethereum?.request({
           method: 'eth_sendTransaction',
@@ -553,6 +564,7 @@ function App() {
               to: pulseProofAddress,
               data,
               gas: toHex(gas),
+              gasPrice: toHex(gasPrice),
             },
           ],
         }) as Promise<Hash | undefined>
