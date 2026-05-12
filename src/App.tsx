@@ -34,7 +34,8 @@ import { formatCompact, formatNumber, formatPercent, shortAddress } from './lib/
 import { fetchGmonadsSnapshot, type GmonadsSnapshot } from './lib/gmonads'
 import { monadTestnet, switchToMonadTestnet } from './lib/monad'
 
-const contractAddress = import.meta.env.VITE_BLITZ_BOARD_ADDRESS as Address | undefined
+const defaultContractAddress = '0x0d29f018EE2662597D431B237f26110cba8851c4'
+const contractAddress = (import.meta.env.VITE_BLITZ_BOARD_ADDRESS || defaultContractAddress) as Address
 
 const fallbackSnapshot: GmonadsSnapshot = {
   network: 'mainnet',

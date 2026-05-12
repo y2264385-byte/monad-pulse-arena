@@ -27,6 +27,12 @@ npm install
 npm run dev
 ```
 
+## Live Demo
+
+- App: https://monad-pulse-arena.vercel.app
+- GitHub: https://github.com/y2264385-byte/monad-pulse-arena
+- Contract: https://testnet.monadvision.com/address/0x0d29f018EE2662597D431B237f26110cba8851c4
+
 ## Deploy To Monad Testnet
 
 Create `.env` from the example:
