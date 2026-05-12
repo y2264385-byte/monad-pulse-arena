@@ -15,3 +15,9 @@ public/icons.svg
 skills-lock.json
 
 .vercel
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
