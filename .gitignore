@@ -13,3 +13,5 @@ src/assets/hero.png
 public/icons.svg
 .agents
 skills-lock.json
+
+.vercel

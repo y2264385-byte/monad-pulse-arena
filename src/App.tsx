@@ -22,7 +22,6 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createPublicClient,
-  decodeFunctionResult,
   encodeFunctionData,
   getContract,
   http,
@@ -347,70 +346,12 @@ function App() {
       client: publicClient,
     })
 
-    const callViaProvider = async (data: `0x${string}`) => {
-      const result = (await window.ethereum!.request({
-        method: 'eth_call',
-        params: [{ to: pulseProofAddress, data }, 'latest'],
-      })) as `0x${string}`
-      return result
-    }
-
-    const readPaginated = async (): Promise<RawPulse> => {
-      const data = encodeFunctionData({
-        abi: pulseProofAbi,
-        functionName: 'getPulsesPaginated',
-        args: [0n, 100n],
-      })
-
-      if (window.ethereum) {
-        try {
-          const result = await callViaProvider(data)
-          return decodeFunctionResult({
-            abi: pulseProofAbi,
-            functionName: 'getPulsesPaginated',
-            data: result,
-          })
-        } catch {
-          // wallet provider refused — fall through
-        }
-      }
-
-      try {
-        return await contract.read.getPulsesPaginated([0n, 100n])
-      } catch {
-        // paginated not available on this deployment — throw so caller can fall back
-        throw new Error('getPulsesPaginated not available')
-      }
-    }
-
-    const readAll = async (): Promise<RawPulse> => {
-      const data = encodeFunctionData({
-        abi: pulseProofAbi,
-        functionName: 'getPulses',
-      })
-
-      if (window.ethereum) {
-        try {
-          const result = await callViaProvider(data)
-          return decodeFunctionResult({
-            abi: pulseProofAbi,
-            functionName: 'getPulses',
-            data: result,
-          })
-        } catch {
-          // wallet provider refused — fall through to public client
-        }
-      }
-
-      return await contract.read.getPulses()
-    }
-
     try {
       let rawPulses: RawPulse
       try {
-        rawPulses = await readPaginated()
+        rawPulses = await contract.read.getPulsesPaginated([0n, 100n])
       } catch {
-        rawPulses = await readAll()
+        rawPulses = await contract.read.getPulses()
       }
 
       setPulses(
@@ -543,33 +484,43 @@ function App() {
         functionName: 'runPulse',
         args: [label],
       })
-      const gas = 250000n
 
-      // Supply every parameter MetaMask might otherwise fetch via RPC.
-      // Monad testnet returns -32603 for wallet-initiated eth_gasPrice /
-      // eth_getTransactionCount calls, which causes MetaMask to abort.
+      // Pre-fetch gasPrice and nonce via public RPC so MetaMask never
+      // needs to call Monad testnet itself (those calls hit -32603).
       let gasPrice = 20000000000n // 20 gwei fallback
-      let nonce: bigint | undefined
-      try {
-        const [fetchedGas, fetchedNonce] = await Promise.all([
-          publicClient.getGasPrice(),
-          publicClient.getTransactionCount({ address: activeAccount }),
-        ])
-        if (fetchedGas > 0n) gasPrice = fetchedGas
-        nonce = BigInt(fetchedNonce)
-      } catch {
-        // use fallback gasPrice; missing nonce is ok
+      let nonce: number | undefined
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const [fetchedGas, fetchedNonce] = await Promise.all([
+            publicClient.getGasPrice(),
+            publicClient.getTransactionCount({ address: activeAccount }),
+          ])
+          if (fetchedGas > 0n) gasPrice = fetchedGas
+          nonce = fetchedNonce
+          break
+        } catch {
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 500))
+          }
+        }
+      }
+      if (nonce === undefined) {
+        throw new Error('Unable to fetch transaction count. Please try again.')
       }
 
+      // Every field MetaMask could derive via RPC is supplied inline,
+      // including chainId (prevents MetaMask from proxying eth_chainId).
       const txParams: Record<string, unknown> = {
         from: activeAccount,
         to: pulseProofAddress,
+        value: '0x0',
         data,
-        gas: toHex(gas),
+        gas: toHex(250000n),
         gasPrice: toHex(gasPrice),
+        nonce: toHex(nonce),
+        chainId: toHex(monadTestnet.id),
         type: '0x0',
       }
-      if (nonce !== undefined) txParams.nonce = toHex(nonce)
 
       const sendTx = () =>
         window.ethereum?.request({
@@ -578,18 +529,17 @@ function App() {
         }) as Promise<Hash | undefined>
 
       let hash: Hash | undefined
-      try {
-        hash = await sendTx()
-      } catch (firstAttempt) {
-        // If the first attempt was aborted, wait and retry once
-        const isAbort =
-          firstAttempt instanceof Error &&
-          (firstAttempt.name === 'AbortError' || firstAttempt.message.includes('abort'))
-        if (isAbort) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1200))
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
           hash = await sendTx()
-        } else {
-          throw firstAttempt
+          break
+        } catch (err) {
+          const isRetryable =
+            (err instanceof Error &&
+              (err.name === 'AbortError' || err.message.includes('abort'))) ||
+            (err && typeof err === 'object' && (err as { code?: number }).code === -32603)
+          if (!isRetryable || attempt >= 2) throw err
+          await new Promise((resolve) => window.setTimeout(resolve, 1200))
         }
       }
       if (!hash) throw new Error('Wallet did not return a transaction hash.')
@@ -598,8 +548,12 @@ function App() {
 
       let receipt: { blockNumber: bigint; gasUsed: bigint } | null = null
       for (let attempt = 0; attempt < 90; attempt += 1) {
-        receipt = await publicClient.getTransactionReceipt({ hash })
-        if (receipt) break
+        try {
+          receipt = await publicClient.getTransactionReceipt({ hash })
+          if (receipt) break
+        } catch {
+          // viem throws TransactionReceiptNotFoundError when the tx hasn't landed yet
+        }
         await new Promise((resolve) => window.setTimeout(resolve, 1200))
       }
       if (!receipt) throw new Error('Timed out while waiting for the transaction receipt.')
