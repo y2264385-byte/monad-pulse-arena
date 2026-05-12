@@ -27,12 +27,12 @@ export function PulseCanvas({ points }: PulseCanvasProps) {
       context.clearRect(0, 0, width, height)
 
       const gradient = context.createLinearGradient(0, 0, width, height)
-      gradient.addColorStop(0, '#ffffff')
-      gradient.addColorStop(1, '#f1f4ec')
+      gradient.addColorStop(0, '#fffdfa')
+      gradient.addColorStop(1, '#f4eee7')
       context.fillStyle = gradient
       context.fillRect(0, 0, width, height)
 
-      context.strokeStyle = 'rgba(35, 24, 47, 0.08)'
+      context.strokeStyle = 'rgba(22, 33, 42, 0.08)'
       context.lineWidth = 1
       for (let i = 1; i < 4; i += 1) {
         const y = (height / 4) * i
@@ -60,17 +60,17 @@ export function PulseCanvas({ points }: PulseCanvasProps) {
         const x = 16 + index * (barWidth + gap)
         const y = height - 22 - barHeight
         const barGradient = context.createLinearGradient(0, y, 0, height - 22)
-        barGradient.addColorStop(0, '#6d28d9')
-        barGradient.addColorStop(1, '#168052')
+        barGradient.addColorStop(0, '#2566d4')
+        barGradient.addColorStop(1, '#0d7b6d')
         context.fillStyle = barGradient
         context.fillRect(x, y, barWidth, barHeight)
       })
 
-      context.fillStyle = '#23182f'
-      context.font = '700 13px Inter, system-ui, sans-serif'
+      context.fillStyle = '#16212a'
+      context.font = '700 13px "Avenir Next", "Segoe UI", sans-serif'
       context.fillText('60 min TPS pulse', 16, 22)
-      context.fillStyle = '#706b7d'
-      context.font = '600 12px Inter, system-ui, sans-serif'
+      context.fillStyle = '#66747d'
+      context.font = '600 12px "Avenir Next", "Segoe UI", sans-serif'
       context.fillText(`${source.length} buckets`, width - 92, 22)
     }
 

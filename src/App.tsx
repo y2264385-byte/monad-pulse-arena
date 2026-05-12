@@ -6,6 +6,7 @@ import {
   CircleDot,
   Clock3,
   Code2,
+  Fingerprint,
   Gauge,
   Loader2,
   Network,
@@ -77,6 +78,18 @@ type ExecutionProof = {
   recordedAt: string
 }
 
+type ExecutionStage =
+  | 'idle'
+  | 'requesting_wallet'
+  | 'switching_network'
+  | 'ready'
+  | 'submitting'
+  | 'confirming'
+  | 'confirmed'
+  | 'failed'
+
+type StepStatus = 'complete' | 'active' | 'upcoming' | 'error'
+
 const publicClient = createPublicClient({
   chain: monadTestnet,
   transport: http(),
@@ -95,6 +108,10 @@ function explorerAddressUrl(address: Address) {
   return `${monadVisionBaseUrl}/address/${address}`
 }
 
+function formatPulseTime(timestamp: number) {
+  return new Date(timestamp * 1000).toLocaleTimeString()
+}
+
 function App() {
   const [snapshot, setSnapshot] = useState<GmonadsSnapshot>(fallbackSnapshot)
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(true)
@@ -107,9 +124,12 @@ function App() {
   const [proof, setProof] = useState<ExecutionProof>()
   const [txStatus, setTxStatus] = useState('')
   const [isTxPending, setIsTxPending] = useState(false)
+  const [executionStage, setExecutionStage] = useState<ExecutionStage>('idle')
 
   const isContractReady = pulseProofAddress !== emptyAddress
   const latestPulse = pulses.at(-1)
+  const recentPulses = [...pulses].reverse().slice(0, 6)
+  const updatedAtLabel = new Date(snapshot.updatedAt).toLocaleTimeString()
 
   const metrics = useMemo(
     () => [
@@ -117,13 +137,13 @@ function App() {
         label: 'TPS',
         value: formatNumber(snapshot.avgTps, 2),
         icon: Activity,
-        tone: 'green',
+        tone: 'teal',
       },
       {
         label: 'Blocks / sec',
         value: formatNumber(snapshot.avgBps, 2),
         icon: Radio,
-        tone: 'purple',
+        tone: 'sky',
       },
       {
         label: 'Block time',
@@ -135,16 +155,51 @@ function App() {
         label: 'Active validators',
         value: snapshot.activeValidators.toString(),
         icon: ShieldCheck,
-        tone: 'blue',
+        tone: 'pine',
       },
     ],
     [snapshot],
   )
 
+  const stageMeta = {
+    idle: {
+      label: 'Waiting for wallet',
+      note: 'Live telemetry is flowing. Connect a wallet to turn this into a real Monad transaction.',
+    },
+    requesting_wallet: {
+      label: 'Wallet handshake',
+      note: 'We are asking the browser wallet for account access.',
+    },
+    switching_network: {
+      label: 'Switching network',
+      note: 'The probe is moving the wallet onto Monad Testnet before signing.',
+    },
+    ready: {
+      label: 'Ready to sign',
+      note: 'Wallet is connected. The next click should open a signature request.',
+    },
+    submitting: {
+      label: 'Opening signature',
+      note: 'The write is being prepared and sent to the wallet for approval.',
+    },
+    confirming: {
+      label: 'Waiting for receipt',
+      note: 'The transaction is in flight. The next visual transition happens when a block confirms it.',
+    },
+    confirmed: {
+      label: 'Receipt captured',
+      note: 'Latency, gas, block number and explorer proof are now available.',
+    },
+    failed: {
+      label: 'Needs attention',
+      note: 'The flow paused because the wallet or transaction returned an error.',
+    },
+  }[executionStage]
+
   const proofStats = [
     {
-      label: 'Last confirmation',
-      value: proof ? formatLatency(proof.latencyMs) : 'Run a pulse',
+      label: 'Confirmation latency',
+      value: proof ? formatLatency(proof.latencyMs) : 'No receipt yet',
       icon: TimerReset,
     },
     {
@@ -154,8 +209,73 @@ function App() {
     },
     {
       label: 'Receipt block',
-      value: proof ? proof.blockNumber.toString() : latestPulse?.observedBlock.toString() ?? 'None',
+      value: proof ? proof.blockNumber.toString() : latestPulse?.observedBlock.toString() ?? 'No block yet',
       icon: Blocks,
+    },
+    {
+      label: 'Recorded pulses',
+      value: pulses.length ? pulses.length.toString() : '0',
+      icon: CheckCircle2,
+    },
+  ]
+
+  const executionSteps = [
+    {
+      key: 'telemetry',
+      title: 'Read live telemetry',
+      detail: `${formatNumber(snapshot.avgTps, 2)} TPS / ${formatNumber(snapshot.avgBps, 2)} BPS`,
+      icon: Activity,
+      status: 'complete' as StepStatus,
+    },
+    {
+      key: 'wallet',
+      title: 'Handshake wallet',
+      detail:
+        account ??
+        (executionStage === 'requesting_wallet' ? 'Approving wallet access...' : 'Connect an EVM wallet'),
+      icon: Wallet,
+      status: ((): StepStatus => {
+        if (executionStage === 'failed' && !account) return 'error'
+        if (
+          executionStage === 'requesting_wallet' ||
+          executionStage === 'switching_network' ||
+          executionStage === 'idle'
+        ) {
+          return 'active'
+        }
+        return 'complete'
+      })(),
+    },
+    {
+      key: 'signature',
+      title: 'Request signature',
+      detail: pulseLabel.trim() || 'Live execution probe',
+      icon: Fingerprint,
+      status: ((): StepStatus => {
+        if (executionStage === 'failed' && account) return 'error'
+        if (executionStage === 'ready' || executionStage === 'submitting') return 'active'
+        if (executionStage === 'confirming' || executionStage === 'confirmed') return 'complete'
+        return 'upcoming'
+      })(),
+    },
+    {
+      key: 'block',
+      title: 'Wait for block',
+      detail: proof ? `Block ${proof.blockNumber}` : executionStage === 'confirming' ? 'Receipt pending...' : 'Awaiting submission',
+      icon: Blocks,
+      status: ((): StepStatus => {
+        if (executionStage === 'failed' && !proof) return 'error'
+        if (executionStage === 'confirming') return 'active'
+        if (executionStage === 'confirmed') return 'complete'
+        return 'upcoming'
+      })(),
+    },
+    {
+      key: 'proof',
+      title: 'Render proof',
+      detail: proof ? shortAddress(proof.hash) : 'Latency, gas and explorer link',
+      icon: ReceiptText,
+      status: proof ? 'complete' : executionStage === 'confirmed' ? 'active' : 'upcoming',
     },
   ]
 
@@ -208,16 +328,40 @@ function App() {
     return () => window.clearInterval(timer)
   }, [loadPulses])
 
+  useEffect(() => {
+    const restoreWallet = async () => {
+      if (!window.ethereum) return
+
+      try {
+        const accounts = (await window.ethereum.request({
+          method: 'eth_accounts',
+        })) as Address[]
+        const nextAccount = accounts[0]
+        if (!nextAccount) return
+
+        setAccount(nextAccount)
+        setWalletStatus(`Wallet ready: ${shortAddress(nextAccount)}`)
+        setExecutionStage((current) => (current === 'confirmed' ? current : 'ready'))
+      } catch {
+        // ignore passive wallet detection failures
+      }
+    }
+
+    void restoreWallet()
+  }, [])
+
   const connectWallet = async () => {
     if (!window.ethereum) {
       const message =
         'No wallet detected. Open the live site in a browser with MetaMask or another EVM wallet installed.'
+      setExecutionStage('failed')
       setWalletStatus(message)
       setTxStatus(message)
       return undefined
     }
 
     setIsWalletPending(true)
+    setExecutionStage('requesting_wallet')
     setWalletStatus('Requesting wallet permission...')
 
     try {
@@ -225,12 +369,15 @@ function App() {
         method: 'eth_requestAccounts',
       })) as Address[]
       setAccount(address)
+      setExecutionStage('switching_network')
       setWalletStatus('Switching to Monad Testnet...')
       await switchToMonadTestnet()
+      setExecutionStage('ready')
       setWalletStatus(`Wallet connected: ${shortAddress(address)}`)
       return address
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Wallet connection failed. Please try again.'
+      setExecutionStage('failed')
       setWalletStatus(message)
       setTxStatus(message)
       return undefined
@@ -251,6 +398,7 @@ function App() {
 
   const runPulseCheck = async () => {
     if (!isContractReady) {
+      setExecutionStage('failed')
       setTxStatus('PulseProof contract is not configured yet.')
       return
     }
@@ -262,7 +410,8 @@ function App() {
     }
 
     setIsTxPending(true)
-    setTxStatus('Sending Pulse Check to Monad Testnet...')
+    setExecutionStage('submitting')
+    setTxStatus('Opening signature request...')
 
     try {
       const label = pulseLabel.trim() || 'Live execution probe'
@@ -275,6 +424,7 @@ function App() {
         functionName: 'runPulse',
         args: [label],
       })
+      setExecutionStage('confirming')
       setTxStatus(`Transaction submitted: ${shortAddress(hash)}`)
 
       const receipt = await publicClient.waitForTransactionReceipt({ hash })
@@ -288,9 +438,11 @@ function App() {
         latencyMs,
         recordedAt: new Date().toLocaleTimeString(),
       })
+      setExecutionStage('confirmed')
       await loadPulses()
       setTxStatus(`Confirmed in ${formatLatency(latencyMs)} on block ${receipt.blockNumber}.`)
     } catch (error) {
+      setExecutionStage('failed')
       setTxStatus(error instanceof Error ? error.message : 'Pulse Check failed.')
     } finally {
       setIsTxPending(false)
@@ -301,17 +453,37 @@ function App() {
     <main>
       <section className="hero-section">
         <div className="hero-copy">
-          <div>
-            <div className="eyebrow">
-              <CircleDot size={16} />
-              Monad execution probe
+          <div className="hero-copy-grid">
+            <div>
+              <div className="eyebrow">
+                <CircleDot size={16} />
+                Monad execution probe
+              </div>
+              <h1>Monad Pulse Lab</h1>
+              <p>
+                A live developer surface that turns Monad transaction flow into something you can
+                watch, follow and verify in one glance.
+              </p>
             </div>
-            <h1>Monad Pulse Lab</h1>
-            <p>
-              A live developer probe that combines gmonads network telemetry with a real
-              Monad Testnet transaction, then turns the receipt into a readable execution proof.
-            </p>
+
+            <div className="signal-grid">
+              <article className="signal-card">
+                <span>Probe state</span>
+                <strong>{stageMeta.label}</strong>
+                <p>{stageMeta.note}</p>
+              </article>
+              <article className="signal-card">
+                <span>Latest on-chain pulse</span>
+                <strong>{latestPulse?.label ?? 'No pulse yet'}</strong>
+                <p>
+                  {latestPulse
+                    ? `${shortAddress(latestPulse.runner)} at ${formatPulseTime(latestPulse.createdAt)}`
+                    : 'Run the next Pulse Check to leave a fresh chain record.'}
+                </p>
+              </article>
+            </div>
           </div>
+
           <div>
             <div className="hero-actions">
               <button
@@ -330,7 +502,7 @@ function App() {
                 className="ghost-action"
               >
                 <Code2 size={18} />
-                Contract
+                PulseProof contract
               </a>
             </div>
             {walletStatus && <p className="wallet-status">{walletStatus}</p>}
@@ -343,9 +515,12 @@ function App() {
               <Network size={16} />
               gmonads live feed
             </span>
-            <button type="button" onClick={refreshSnapshot} disabled={isLoadingSnapshot} title="Refresh">
-              {isLoadingSnapshot ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
-            </button>
+            <div className="panel-actions">
+              <span className="panel-stamp">Updated {updatedAtLabel}</span>
+              <button type="button" onClick={refreshSnapshot} disabled={isLoadingSnapshot} title="Refresh">
+                {isLoadingSnapshot ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
+              </button>
+            </div>
           </div>
           <div className="metric-grid">
             {metrics.map((metric) => (
@@ -375,36 +550,33 @@ function App() {
         </div>
       </section>
 
-      <section className="section-band">
-        <div className="section-heading">
+      <section className="path-band">
+        <div className="path-headline">
           <div>
             <span className="eyebrow">
               <Sparkles size={16} />
-              Technical path
+              Execution path
             </span>
-            <h2>From live network state to verifiable execution proof</h2>
+            <h2>Watch the transaction move from wallet intent to receipt proof</h2>
           </div>
           <p>
-            The app makes Monad observable in one loop: read the current network pulse, submit
-            one transaction, wait for the receipt, and expose the proof trail.
+            The flow below stays readable while the state changes, so the Monad path feels like a
+            route instead of a black box.
           </p>
         </div>
-        <div className="feature-row">
-          <article>
-            <Activity size={24} />
-            <h3>Telemetry context</h3>
-            <p>gmonads supplies TPS, BPS, block time, validator state and the recent pulse chart.</p>
-          </article>
-          <article>
-            <Zap size={24} />
-            <h3>Real transaction</h3>
-            <p>A wallet signs `runPulse(label)` against PulseProof on Monad Testnet.</p>
-          </article>
-          <article>
-            <ReceiptText size={24} />
-            <h3>Receipt proof</h3>
-            <p>The UI reports transaction hash, confirmation latency, gas used and receipt block.</p>
-          </article>
+
+        <div className="path-rail">
+          {executionSteps.map((step) => (
+            <article className={`path-step ${step.status}`} key={step.key}>
+              <div className="path-node">
+                <step.icon size={18} />
+              </div>
+              <div className="path-step-copy">
+                <span>{step.title}</span>
+                <strong>{step.key === 'wallet' && account ? shortAddress(account) : step.detail}</strong>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -413,16 +585,17 @@ function App() {
           <div className="section-heading compact">
             <div>
               <span className="eyebrow">
-                <TimerReset size={16} />
-                Pulse Check
+                <Fingerprint size={16} />
+                Operator console
               </span>
-              <h2>Send one observable Monad transaction</h2>
+              <h2>Launch the next Pulse Check</h2>
             </div>
             <p>
-              Label the run, send it to the PulseProof contract, then watch the receipt become
-              a compact execution proof.
+              Label the run, sign a Monad Testnet write and let the receipt populate the proof
+              surface on the right.
             </p>
           </div>
+
           <label>
             Run label
             <input
@@ -432,6 +605,7 @@ function App() {
               maxLength={64}
             />
           </label>
+
           <button
             type="button"
             className="primary-action wide"
@@ -441,17 +615,33 @@ function App() {
             {isTxPending ? <Loader2 className="spin" size={18} /> : <Zap size={18} />}
             {isTxPending ? 'Waiting for receipt' : 'Run Pulse Check'}
           </button>
+
           {txStatus && <p className="tx-status">{txStatus}</p>}
+
+          <div className="operator-grid">
+            <article className="operator-card">
+              <span>Wallet</span>
+              <strong>{account ? shortAddress(account) : 'Not connected'}</strong>
+              <p>Use the same address for repeated probes to build a visible execution history.</p>
+            </article>
+            <article className="operator-card">
+              <span>Contract</span>
+              <a href={explorerAddressUrl(pulseProofAddress)} target="_blank" rel="noreferrer">
+                {shortAddress(pulseProofAddress)}
+              </a>
+              <p>Every pulse lands on the same contract, which keeps the path legible for demos.</p>
+            </article>
+          </div>
         </div>
 
         <div className="proof-panel">
           <div className="proof-topline">
             <div>
               <span className="eyebrow">
-                <CheckCircle2 size={16} />
-                Execution proof
+                <ReceiptText size={16} />
+                Receipt proof
               </span>
-              <h2>{proof ? proof.label : 'No pulse yet'}</h2>
+              <h2>{proof ? proof.label : 'The next receipt will appear here'}</h2>
             </div>
             {proof && (
               <a href={explorerTxUrl(proof.hash)} target="_blank" rel="noreferrer" className="icon-link">
@@ -472,29 +662,37 @@ function App() {
 
           <div className="proof-detail">
             <div>
-              <span>Contract</span>
-              <a href={explorerAddressUrl(pulseProofAddress)} target="_blank" rel="noreferrer">
-                {shortAddress(pulseProofAddress)}
-              </a>
+              <span>Transaction hash</span>
+              {proof ? (
+                <a href={explorerTxUrl(proof.hash)} target="_blank" rel="noreferrer">
+                  {shortAddress(proof.hash)}
+                </a>
+              ) : (
+                <strong>Waiting for receipt</strong>
+              )}
             </div>
             <div>
               <span>Runner</span>
               <strong>{proof ? shortAddress(proof.runner) : account ? shortAddress(account) : 'Connect wallet'}</strong>
             </div>
             <div>
-              <span>Tx hash</span>
-              {proof ? (
-                <a href={explorerTxUrl(proof.hash)} target="_blank" rel="noreferrer">
-                  {shortAddress(proof.hash)}
-                </a>
-              ) : (
-                <strong>Waiting</strong>
-              )}
+              <span>Recorded at</span>
+              <strong>{proof?.recordedAt ?? 'No receipt yet'}</strong>
             </div>
             <div>
-              <span>Recorded</span>
-              <strong>{proof?.recordedAt ?? 'Not yet'}</strong>
+              <span>Explorer path</span>
+              <a href={explorerAddressUrl(pulseProofAddress)} target="_blank" rel="noreferrer">
+                Open contract
+              </a>
             </div>
+          </div>
+
+          <div className="proof-note">
+            <strong>What this surface proves</strong>
+            <p>
+              This is not a mocked success state. The numbers above only appear after Monad Testnet
+              returns a real receipt and the app binds it back into the visual path.
+            </p>
           </div>
         </div>
       </section>
@@ -508,26 +706,39 @@ function App() {
             </span>
             <h2>Recent PulseProof records</h2>
           </div>
-          <p>{pulses.length} pulse checks are stored in the current contract.</p>
+          <p>
+            The history reads like a lightweight event log: label, runner and observed block in the
+            same frame.
+          </p>
         </div>
+
         <div className="pulse-list">
-          {[...pulses].reverse().slice(0, 6).map((pulse) => (
+          {recentPulses.map((pulse) => (
             <article className="pulse-card" key={pulse.id}>
               <div>
-                <span>#{pulse.id}</span>
+                <span>Pulse #{pulse.id}</span>
                 <h3>{pulse.label}</h3>
               </div>
-              <div>
-                <span>Runner</span>
-                <strong>{shortAddress(pulse.runner)}</strong>
-              </div>
-              <div>
-                <span>Observed block</span>
-                <strong>{pulse.observedBlock}</strong>
+              <div className="pulse-meta">
+                <div>
+                  <span>Runner</span>
+                  <strong>{shortAddress(pulse.runner)}</strong>
+                </div>
+                <div>
+                  <span>Observed block</span>
+                  <strong>{pulse.observedBlock}</strong>
+                </div>
+                <div>
+                  <span>Recorded</span>
+                  <strong>{formatPulseTime(pulse.createdAt)}</strong>
+                </div>
               </div>
             </article>
           ))}
-          {pulses.length === 0 && <p className="empty-state">Run the first Pulse Check to create history.</p>}
+
+          {recentPulses.length === 0 && (
+            <p className="empty-state">Run the first Pulse Check to generate your own on-chain history.</p>
+          )}
         </div>
       </section>
     </main>
