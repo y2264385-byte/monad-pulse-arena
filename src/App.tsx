@@ -114,7 +114,13 @@ function formatPulseTime(timestamp: number) {
 }
 
 function describeError(error: unknown) {
-  if (error instanceof Error && error.message) return error.message
+  if (error instanceof Error && error.message) {
+    const msg = error.message
+    if (msg.includes('abort') || error.name === 'AbortError') {
+      return 'Wallet connection interrupted. Please unlock MetaMask, make sure it shows the Monad Testnet network, then try again.'
+    }
+    return msg
+  }
   if (typeof error === 'string') return error
 
   if (error && typeof error === 'object') {
@@ -123,7 +129,11 @@ function describeError(error: unknown) {
       message?: unknown
       details?: unknown
       code?: unknown
+      name?: unknown
     }
+
+    if (candidate.code === 4001) return 'Transaction was rejected in wallet.'
+    if (candidate.code === -32603) return 'Internal wallet error. Try switching to Monad Testnet manually in MetaMask first.'
 
     for (const value of [candidate.shortMessage, candidate.message, candidate.details]) {
       if (typeof value === 'string' && value.trim().length > 0) return value
@@ -498,9 +508,12 @@ function App() {
     }
 
     let activeAccount = account
+    const justConnected = !activeAccount
     if (!activeAccount) {
       activeAccount = await connectWallet()
       if (!activeAccount) return
+      // Wallet was just switched to Monad Testnet by connectWallet — give it a moment
+      await new Promise((resolve) => window.setTimeout(resolve, 600))
     }
 
     setIsTxPending(true)
@@ -510,14 +523,19 @@ function App() {
     try {
       const label = pulseLabel.trim() || 'Live execution probe'
       const startedAt = performance.now()
-      const expectedChainId = `0x${monadTestnet.id.toString(16)}`
-      const activeChainId = (await window.ethereum?.request({
-        method: 'eth_chainId',
-      })) as string | undefined
-      if (activeChainId !== expectedChainId) {
-        setExecutionStage('switching_network')
-        setWalletStatus('Switching to Monad Testnet...')
-        await switchToMonadTestnet()
+
+      // Only check chain if wallet wasn't just connected (connectWallet already switched it)
+      if (!justConnected) {
+        const expectedChainId = `0x${monadTestnet.id.toString(16)}`
+        const activeChainId = (await window.ethereum?.request({
+          method: 'eth_chainId',
+        })) as string | undefined
+        if (activeChainId !== expectedChainId) {
+          setExecutionStage('switching_network')
+          setWalletStatus('Switching to Monad Testnet...')
+          await switchToMonadTestnet()
+          await new Promise((resolve) => window.setTimeout(resolve, 600))
+        }
       }
 
       const data = encodeFunctionData({
@@ -526,17 +544,34 @@ function App() {
         args: [label],
       })
       const gas = 250000n
-      const hash = (await window.ethereum?.request({
-        method: 'eth_sendTransaction',
-        params: [
-          {
-            from: activeAccount,
-            to: pulseProofAddress,
-            data,
-            gas: toHex(gas),
-          },
-        ],
-      })) as Hash | undefined
+      const sendTx = () =>
+        window.ethereum?.request({
+          method: 'eth_sendTransaction',
+          params: [
+            {
+              from: activeAccount,
+              to: pulseProofAddress,
+              data,
+              gas: toHex(gas),
+            },
+          ],
+        }) as Promise<Hash | undefined>
+
+      let hash: Hash | undefined
+      try {
+        hash = await sendTx()
+      } catch (firstAttempt) {
+        // If the first attempt was aborted, wait and retry once
+        const isAbort =
+          firstAttempt instanceof Error &&
+          (firstAttempt.name === 'AbortError' || firstAttempt.message.includes('abort'))
+        if (isAbort) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1200))
+          hash = await sendTx()
+        } else {
+          throw firstAttempt
+        }
+      }
       if (!hash) throw new Error('Wallet did not return a transaction hash.')
       setExecutionStage('confirming')
       setTxStatus(`Transaction submitted: ${shortAddress(hash)}`)
