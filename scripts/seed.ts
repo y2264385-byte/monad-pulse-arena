@@ -1,20 +1,20 @@
 import 'dotenv/config'
 import { createPublicClient, createWalletClient, http, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { blitzBoardAbi } from '../src/lib/abi'
+import { pulseProofAbi } from '../src/lib/abi'
 
 const samples = [
-  ['PulseBoard', 'Monad network pulse board powered by gmonads live validator and block metrics.'],
-  ['Validator Lens', 'A focused leaderboard for active validators, epoch state, stake and commission.'],
-  ['Blitz Votes', 'A one-address-one-vote judging flow deployed on Monad Testnet.'],
+  'Baseline wallet-to-receipt probe',
+  'gmonads telemetry context check',
+  'Live demo execution proof',
 ] as const
 
 async function main() {
-  const address = process.env.BLITZ_BOARD_ADDRESS ?? process.env.VITE_BLITZ_BOARD_ADDRESS
+  const address = process.env.PULSE_PROOF_ADDRESS ?? process.env.VITE_PULSE_PROOF_ADDRESS
   const rpcUrl = process.env.MONAD_TESTNET_RPC_URL
   const privateKey = process.env.PRIVATE_KEY as Hex | undefined
 
-  if (!address) throw new Error('Set BLITZ_BOARD_ADDRESS or VITE_BLITZ_BOARD_ADDRESS before running seed')
+  if (!address) throw new Error('Set PULSE_PROOF_ADDRESS or VITE_PULSE_PROOF_ADDRESS before running seed')
   if (!rpcUrl) throw new Error('Set MONAD_TESTNET_RPC_URL before running seed')
   if (!privateKey) throw new Error('Set PRIVATE_KEY before running seed')
 
@@ -44,14 +44,14 @@ async function main() {
     transport: http(rpcUrl),
   })
 
-  for (const [name, pitch] of samples) {
+  for (const label of samples) {
     const hash = await walletClient.writeContract({
       address: address as Address,
-      abi: blitzBoardAbi,
-      functionName: 'registerProject',
-      args: [name, pitch],
+      abi: pulseProofAbi,
+      functionName: 'runPulse',
+      args: [label],
     })
-    console.log(`Registered ${name}: ${hash}`)
+    console.log(`Recorded "${label}": ${hash}`)
     await publicClient.waitForTransactionReceipt({ hash })
   }
 }

@@ -1,23 +1,38 @@
-# Monad Pulse Arena
+# Monad Pulse Lab
 
-Monad Pulse Arena is a fresh Monad Blitz project built for a 5 minute live demo. It combines:
+Monad Pulse Lab is a Monad Blitz demo that makes the transaction path visible.
+It combines live gmonads network telemetry with a real Monad Testnet contract
+call, then turns the transaction receipt into a compact execution proof.
 
-- a React dashboard that reads live Monad network stats from the public gmonads API
-- a Solidity `BlitzBoard` contract for project registration and one-address-one-vote judging
-- Hardhat 3 configuration for Monad Testnet deployment
+## What It Shows
 
-## Demo Story
-
-1. Open the app and show real Monad network activity: TPS, blocks per second, block time, validator count, epoch and recent TPS pulse.
+1. Read live Monad network state from gmonads: TPS, blocks per second, block time,
+   validator count, epoch and recent TPS pulse.
 2. Connect an EVM wallet and switch to Monad Testnet.
-3. Register a project and vote. In demo mode it updates locally; after deployment it writes to `BlitzBoard.sol` on Monad Testnet.
+3. Run a Pulse Check by sending `runPulse(label)` to `PulseProof.sol`.
+4. Wait for the receipt and display transaction hash, confirmation latency, gas
+   used, receipt block and MonadVision links.
+5. Load recent on-chain pulse records from the deployed contract.
+
+## Why It Matters
+
+The project is not a voting app or a generic dashboard. It is a small developer
+experience probe for Monad: a user can see current network conditions, submit a
+real transaction, and verify the result from both the UI and the block explorer.
+
+## Live Demo
+
+- App: https://monad-pulse-arena.vercel.app
+- GitHub: https://github.com/y2264385-byte/monad-pulse-arena
+- Contract: https://testnet.monadvision.com/address/0x35d42feD97705034BA4613f2e0bFE14309852472
 
 ## Tech Stack
 
 - React + TypeScript + Vite
-- Viem for wallet and contract calls
+- Viem for wallet, contract calls and receipt reads
+- Solidity `PulseProof.sol`
 - Hardhat 3 + Ignition
-- Monad Testnet: chain id `10143`, RPC `https://testnet-rpc.monad.xyz`
+- Monad Testnet: chain id `10143`
 - gmonads public API for realtime network data
 
 ## Run Locally
@@ -27,12 +42,6 @@ npm install
 npm run dev
 ```
 
-## Live Demo
-
-- App: https://monad-pulse-arena.vercel.app
-- GitHub: https://github.com/y2264385-byte/monad-pulse-arena
-- Contract: https://testnet.monadvision.com/address/0x0d29f018EE2662597D431B237f26110cba8851c4
-
 ## Deploy To Monad Testnet
 
 Create `.env` from the example:
@@ -41,7 +50,7 @@ Create `.env` from the example:
 cp .env.example .env
 ```
 
-Fill in `PRIVATE_KEY`, then compile and deploy:
+Fill in `PRIVATE_KEY` and `MONAD_TESTNET_RPC_URL`, then compile and deploy:
 
 ```bash
 npm run compile
@@ -51,28 +60,38 @@ npm run deploy:monad
 After deployment, copy the deployed contract address into:
 
 ```env
-VITE_BLITZ_BOARD_ADDRESS=0xYourContractAddress
+VITE_PULSE_PROOF_ADDRESS=0xYourContractAddress
+PULSE_PROOF_ADDRESS=0xYourContractAddress
 ```
 
-Restart `npm run dev`. The frontend will switch from local demo mode to on-chain mode.
+Seed a few demo pulses if needed:
+
+```bash
+npm run seed:monad
+```
 
 ## Current Monad Testnet Deployment
 
-- `BlitzBoard`: `0x0d29f018EE2662597D431B237f26110cba8851c4`
-- Seed projects: `PulseBoard`, `Validator Lens`, `Blitz Votes`
+- `PulseProof`: `0x35d42feD97705034BA4613f2e0bFE14309852472`
+- Seed records:
+  - `Baseline wallet-to-receipt probe`
+  - `gmonads telemetry context check`
+  - `Live demo execution proof`
 
 ## Contract
 
-`contracts/BlitzBoard.sol` stores:
+`contracts/PulseProof.sol` stores:
 
-- project id, creator, name, pitch, created timestamp
-- vote count per project
-- `hasVoted` mapping to enforce one vote per wallet
+- pulse id
+- runner address
+- run label
+- created timestamp
+- observed block number
+- per-runner pulse count
 
 Events:
 
-- `ProjectRegistered`
-- `Voted`
+- `PulseRecorded`
 
 ## Public Sources Used
 
