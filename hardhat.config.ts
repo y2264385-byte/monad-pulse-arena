@@ -18,7 +18,6 @@ export default defineConfig({
   solidity: {
     profiles: {
       default: solidityProfile,
-      production: solidityProfile,
     },
   },
   networks: {

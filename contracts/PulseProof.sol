@@ -48,6 +48,19 @@ contract PulseProof {
         return pulses;
     }
 
+    function getPulsesPaginated(uint256 offset, uint256 limit) external view returns (Pulse[] memory) {
+        uint256 length = pulses.length;
+        if (offset >= length) return new Pulse[](0);
+
+        uint256 end = offset + limit > length ? length : offset + limit;
+        uint256 size = end - offset;
+        Pulse[] memory page = new Pulse[](size);
+        for (uint256 i = 0; i < size; i++) {
+            page[i] = pulses[offset + i];
+        }
+        return page;
+    }
+
     function pulseCount() external view returns (uint256) {
         return pulses.length;
     }

@@ -12,10 +12,6 @@ export function formatCompact(value: number) {
   }).format(value)
 }
 
-export function formatPercent(value: number) {
-  return `${formatNumber(value, 1)}%`
-}
-
 export function shortAddress(value: string) {
   if (value.length <= 14) return value
   return `${value.slice(0, 6)}...${value.slice(-4)}`

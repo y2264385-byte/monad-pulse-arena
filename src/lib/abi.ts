@@ -27,6 +27,28 @@ export const pulseProofAbi = [
   },
   {
     type: 'function',
+    name: 'getPulsesPaginated',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'offset', type: 'uint256' },
+      { name: 'limit', type: 'uint256' },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple[]',
+        components: [
+          { name: 'id', type: 'uint256' },
+          { name: 'runner', type: 'address' },
+          { name: 'label', type: 'string' },
+          { name: 'createdAt', type: 'uint64' },
+          { name: 'observedBlock', type: 'uint256' },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'function',
     name: 'pulseCount',
     stateMutability: 'view',
     inputs: [],

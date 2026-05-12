@@ -113,11 +113,6 @@ function formatPulseTime(timestamp: number) {
   return new Date(timestamp * 1000).toLocaleTimeString()
 }
 
-function hexToBigInt(value: string | undefined) {
-  if (!value) return 0n
-  return BigInt(value)
-}
-
 function describeError(error: unknown) {
   if (error instanceof Error && error.message) return error.message
   if (typeof error === 'string') return error
@@ -328,37 +323,84 @@ function App() {
   const loadPulses = useCallback(async () => {
     if (!isContractReady) return
 
-    try {
-      let rawPulses:
-        | ReadonlyArray<{
-            id: bigint
-            runner: Address
-            label: string
-            createdAt: bigint
-            observedBlock: bigint
-          }>
+    type RawPulse = ReadonlyArray<{
+      id: bigint
+      runner: Address
+      label: string
+      createdAt: bigint
+      observedBlock: bigint
+    }>
+
+    const contract = getContract({
+      address: pulseProofAddress,
+      abi: pulseProofAbi,
+      client: publicClient,
+    })
+
+    const callViaProvider = async (data: `0x${string}`) => {
+      const result = (await window.ethereum!.request({
+        method: 'eth_call',
+        params: [{ to: pulseProofAddress, data }, 'latest'],
+      })) as `0x${string}`
+      return result
+    }
+
+    const readPaginated = async (): Promise<RawPulse> => {
+      const data = encodeFunctionData({
+        abi: pulseProofAbi,
+        functionName: 'getPulsesPaginated',
+        args: [0n, 100n],
+      })
 
       if (window.ethereum) {
-        const data = encodeFunctionData({
-          abi: pulseProofAbi,
-          functionName: 'getPulses',
-        })
-        const result = (await window.ethereum.request({
-          method: 'eth_call',
-          params: [{ to: pulseProofAddress, data }, 'latest'],
-        })) as `0x${string}`
-        rawPulses = decodeFunctionResult({
-          abi: pulseProofAbi,
-          functionName: 'getPulses',
-          data: result,
-        })
-      } else {
-        const contract = getContract({
-          address: pulseProofAddress,
-          abi: pulseProofAbi,
-          client: publicClient,
-        })
-        rawPulses = await contract.read.getPulses()
+        try {
+          const result = await callViaProvider(data)
+          return decodeFunctionResult({
+            abi: pulseProofAbi,
+            functionName: 'getPulsesPaginated',
+            data: result,
+          })
+        } catch {
+          // wallet provider refused — fall through
+        }
+      }
+
+      try {
+        return await contract.read.getPulsesPaginated([0n, 100n])
+      } catch {
+        // paginated not available on this deployment — throw so caller can fall back
+        throw new Error('getPulsesPaginated not available')
+      }
+    }
+
+    const readAll = async (): Promise<RawPulse> => {
+      const data = encodeFunctionData({
+        abi: pulseProofAbi,
+        functionName: 'getPulses',
+      })
+
+      if (window.ethereum) {
+        try {
+          const result = await callViaProvider(data)
+          return decodeFunctionResult({
+            abi: pulseProofAbi,
+            functionName: 'getPulses',
+            data: result,
+          })
+        } catch {
+          // wallet provider refused — fall through to public client
+        }
+      }
+
+      return await contract.read.getPulses()
+    }
+
+    try {
+      let rawPulses: RawPulse
+      try {
+        rawPulses = await readPaginated()
+      } catch {
+        rawPulses = await readAll()
       }
 
       setPulses(
@@ -371,7 +413,7 @@ function App() {
         })),
       )
     } catch {
-      // Keep the UI usable even if a browser RPC endpoint refuses reads.
+      // Keep the UI usable even if every read path fails.
     }
   }, [isContractReady])
 
@@ -499,18 +541,9 @@ function App() {
       setExecutionStage('confirming')
       setTxStatus(`Transaction submitted: ${shortAddress(hash)}`)
 
-      let receipt:
-        | {
-            blockNumber?: string
-            gasUsed?: string
-          }
-        | null
-        | undefined
+      let receipt: { blockNumber: bigint; gasUsed: bigint } | null = null
       for (let attempt = 0; attempt < 90; attempt += 1) {
-        receipt = (await window.ethereum?.request({
-          method: 'eth_getTransactionReceipt',
-          params: [hash],
-        })) as { blockNumber?: string; gasUsed?: string } | null | undefined
+        receipt = await publicClient.getTransactionReceipt({ hash })
         if (receipt) break
         await new Promise((resolve) => window.setTimeout(resolve, 1200))
       }
@@ -520,17 +553,18 @@ function App() {
         hash,
         label,
         runner: activeAccount,
-        blockNumber: hexToBigInt(receipt.blockNumber),
-        gasUsed: hexToBigInt(receipt.gasUsed),
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed,
         latencyMs,
         recordedAt: new Date().toLocaleTimeString(),
       })
       setExecutionStage('confirmed')
       await loadPulses()
       setTxStatus(
-        `Confirmed in ${formatLatency(latencyMs)} on block ${hexToBigInt(receipt.blockNumber)}.`,
+        `Confirmed in ${formatLatency(latencyMs)} on block ${receipt.blockNumber}.`,
       )
     } catch (error) {
+      console.dir(error)
       setExecutionStage('failed')
       setTxStatus(describeError(error))
     } finally {
