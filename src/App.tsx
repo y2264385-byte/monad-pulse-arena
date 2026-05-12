@@ -417,12 +417,21 @@ function App() {
       const label = pulseLabel.trim() || 'Live execution probe'
       const walletClient = getWalletClient(activeAccount)
       const startedAt = performance.now()
+      const estimatedGas = await publicClient.estimateContractGas({
+        account: activeAccount,
+        address: pulseProofAddress,
+        abi: pulseProofAbi,
+        functionName: 'runPulse',
+        args: [label],
+      })
+      const gas = (estimatedGas * 12n) / 10n
       const hash = await walletClient.writeContract({
         account: activeAccount,
         address: pulseProofAddress,
         abi: pulseProofAbi,
         functionName: 'runPulse',
         args: [label],
+        gas,
       })
       setExecutionStage('confirming')
       setTxStatus(`Transaction submitted: ${shortAddress(hash)}`)
