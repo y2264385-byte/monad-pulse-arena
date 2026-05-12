@@ -22,7 +22,8 @@ real transaction, and verify the result from both the UI and the block explorer.
 
 ## Live Demo
 
-- App: https://monad-pulse-arena.vercel.app
+- App: https://monad-pulse-arena.y2264385.workers.dev
+- Backup: https://monad-pulse-arena.vercel.app
 - GitHub: https://github.com/y2264385-byte/monad-pulse-arena
 - Contract: https://testnet.monadvision.com/address/0x35d42feD97705034BA4613f2e0bFE14309852472
 
