@@ -118,6 +118,32 @@ function hexToBigInt(value: string | undefined) {
   return BigInt(value)
 }
 
+function describeError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string') return error
+
+  if (error && typeof error === 'object') {
+    const candidate = error as {
+      shortMessage?: unknown
+      message?: unknown
+      details?: unknown
+      code?: unknown
+    }
+
+    for (const value of [candidate.shortMessage, candidate.message, candidate.details]) {
+      if (typeof value === 'string' && value.trim().length > 0) return value
+    }
+
+    try {
+      return JSON.stringify(error)
+    } catch {
+      if (candidate.code !== undefined) return `Wallet request failed with code ${String(candidate.code)}.`
+    }
+  }
+
+  return 'Pulse Check failed.'
+}
+
 function App() {
   const [snapshot, setSnapshot] = useState<GmonadsSnapshot>(fallbackSnapshot)
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(true)
@@ -412,7 +438,7 @@ function App() {
       setWalletStatus(`Wallet connected: ${shortAddress(address)}`)
       return address
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Wallet connection failed. Please try again.'
+      const message = describeError(error)
       setExecutionStage('failed')
       setWalletStatus(message)
       setTxStatus(message)
@@ -442,22 +468,22 @@ function App() {
     try {
       const label = pulseLabel.trim() || 'Live execution probe'
       const startedAt = performance.now()
+      const expectedChainId = `0x${monadTestnet.id.toString(16)}`
+      const activeChainId = (await window.ethereum?.request({
+        method: 'eth_chainId',
+      })) as string | undefined
+      if (activeChainId !== expectedChainId) {
+        setExecutionStage('switching_network')
+        setWalletStatus('Switching to Monad Testnet...')
+        await switchToMonadTestnet()
+      }
+
       const data = encodeFunctionData({
         abi: pulseProofAbi,
         functionName: 'runPulse',
         args: [label],
       })
-      const estimatedGasHex = (await window.ethereum?.request({
-        method: 'eth_estimateGas',
-        params: [
-          {
-            from: activeAccount,
-            to: pulseProofAddress,
-            data,
-          },
-        ],
-      })) as string | undefined
-      const gas = (hexToBigInt(estimatedGasHex) * 12n) / 10n
+      const gas = 250000n
       const hash = (await window.ethereum?.request({
         method: 'eth_sendTransaction',
         params: [
@@ -506,7 +532,7 @@ function App() {
       )
     } catch (error) {
       setExecutionStage('failed')
-      setTxStatus(error instanceof Error ? error.message : 'Pulse Check failed.')
+      setTxStatus(describeError(error))
     } finally {
       setIsTxPending(false)
     }
